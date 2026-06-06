@@ -1,0 +1,19 @@
+[Unit]
+Description=levelprobs live SPX level-hit alerts (TradingView webhook)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/home/matt/git/levelprobs
+# Edit --history-csv to point at your TradingView SPX 5-min export.
+ExecStart=/usr/bin/python3 -m levelprobs SPX --watch --feed webhook \
+    --history-csv /home/matt/git/levelprobs/data/spx_history.csv \
+    --port 8731 --poll 10 --min-prob 0.80 --min-points 15
+Restart=always
+RestartSec=5
+# desktop notifications need the user session bus (inherited by --user services)
+
+[Install]
+WantedBy=graphical-session.target
