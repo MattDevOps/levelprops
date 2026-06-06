@@ -42,6 +42,30 @@ class SyntheticReplayFeed:
         return self.history, self.today, bi, price
 
 
+class CsvReplayFeed:
+    """Replays a REAL TradingView CSV export one RTH bar per snapshot, so the
+    live dashboard ticks with actual SPX prices (time-compressed). history =
+    all prior sessions; today = the most recent session, revealed bar-by-bar."""
+
+    def __init__(self, path: str, start_bar: int = 0, end_bar: int = None):
+        from .loaders import load_sessions_from_csv
+        sess = load_sessions_from_csv(path, warn=False)
+        if len(sess) < 2:
+            raise ValueError("need >= 2 sessions in the CSV to replay")
+        self.symbol = "SPX"
+        self.history, self.today = sess[:-1], sess[-1]
+        self.cursor = max(0, start_bar)
+        self.end_bar = (len(self.today.bars) - 1) if end_bar is None else end_bar
+
+    def snapshot(self):
+        if self.cursor > self.end_bar:
+            return None
+        bi = self.cursor
+        price = self.today.bars[bi].c
+        self.cursor += 1
+        return self.history, self.today, bi, price
+
+
 class _LiveToday:
     """Accumulates the current session's bars + overnight high/low from a price
     stream, so 'today' is built live instead of taken from a fixed tape."""

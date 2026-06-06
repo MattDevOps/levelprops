@@ -10,6 +10,45 @@ from .model import bar_index_for
 from datetime import time as _time
 
 
+def run_demo(args):
+    """Live full-report dashboard. Two sources:
+      replay  (default): stream a real TradingView CSV export bar-by-bar
+      webhook (--feed webhook): truly live, fed by TradingView alerts."""
+    from .dashboard import run_dashboard
+    sym = "SPX" if args.symbol.upper() == "ES" else args.symbol.upper()
+
+    if args.feed == "webhook":
+        from .feeds import TradingViewWebhookFeed
+        history = None
+        if args.history_csv:
+            from .loaders import load_sessions_from_csv
+            history = load_sessions_from_csv(args.history_csv)
+        feed = TradingViewWebhookFeed(sym, port=args.port, history=history,
+                                      sessions=args.sessions, seed=args.seed)
+        run_dashboard(feed, sym, csv_path=args.history_csv, halflife=args.halflife,
+                      refresh_seconds=args.refresh or 5.0, min_prob=args.min_prob,
+                      min_points=args.min_points, mode="WEBHOOK LIVE",
+                      synthetic=history is None)
+        return
+
+    # replay mode -- needs real data to replay
+    if not args.history_csv:
+        print("[demo] replay needs --history-csv (real data to replay).\n"
+              "       e.g. python -m levelprobs SPX --demo "
+              "--history-csv data/spx_history.csv\n"
+              "       or run truly live with: --demo --feed webhook")
+        return
+    from .feeds import CsvReplayFeed
+    refresh = args.refresh if args.refresh is not None else 0.6
+    while True:
+        feed = CsvReplayFeed(args.history_csv, start_bar=0)
+        run_dashboard(feed, sym, csv_path=args.history_csv, halflife=args.halflife,
+                      refresh_seconds=refresh, min_prob=args.min_prob,
+                      min_points=args.min_points, mode="CSV REPLAY", synthetic=False)
+        if not args.repeat:
+            break
+
+
 def main():
     ap = argparse.ArgumentParser(
         prog="levelprobs",
@@ -24,7 +63,13 @@ def main():
     ap.add_argument("--target", type=float, action="append", default=None,
                     help="also spotlight a specific price level (repeatable)")
     ap.add_argument("--seed", type=int, default=7, help="synthetic RNG seed")
-    # --- live watch mode ---
+    # --- live dashboard / watch mode ---
+    ap.add_argument("--demo", action="store_true",
+                    help="live full-report dashboard (replay CSV, or webhook live)")
+    ap.add_argument("--refresh", type=float, default=None,
+                    help="dashboard redraw interval secs (default 0.6 replay / 5 live)")
+    ap.add_argument("--repeat", action="store_true",
+                    help="loop the replay demo forever (Ctrl-C to stop)")
     ap.add_argument("--watch", action="store_true", help="run the live alert loop")
     ap.add_argument("--feed", choices=["synthetic", "webhook"], default="synthetic",
                     help="data source for --watch")
@@ -38,6 +83,10 @@ def main():
     ap.add_argument("--history-csv", default=None,
                     help="real RTH 5-min CSV for the historical base (else synthetic)")
     args = ap.parse_args()
+
+    if args.demo:
+        run_demo(args)
+        return
 
     if not args.watch:
         if args.history_csv:

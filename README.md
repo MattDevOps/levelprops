@@ -109,6 +109,31 @@ that day's overnight high/low; 09:30–15:55 are the RTH bars. See
 `levelprobs/loaders.py` for the exact contract and how to adapt other formats
 (Databento, Polygon, IBKR, TradingView export).
 
+## Live dashboard (`--demo`)
+
+A full-screen, self-refreshing view of the whole report -- directional bias +
+the Pine-levels price ladder -- redrawn on every tick so you can watch
+`P(touch)` move and the named levels re-snap as price walks. Two sources:
+
+```bash
+# INSTANT DEMO -- replays your real TradingView export bar-by-bar (real SPX
+# prices, time-compressed). No market hours, no ngrok needed:
+python3 -m levelprobs SPX --demo --history-csv data/spx_history.csv
+#   --refresh 0.6   redraw interval (seconds)
+#   --repeat        loop the day forever (good for a screen recording)
+
+# TRULY LIVE -- fed by the TradingView webhook (real-time SPX price); levels
+# come from the CSV export, refreshed each tick:
+python3 -m levelprobs SPX --demo --feed webhook --history-csv data/spx_history.csv
+```
+
+Live mode binds the webhook port (default 8731, `--port`). If the auto-start
+`levelprobs` systemd service is already running it owns that port, so either
+stop it first (`systemctl --user stop levelprobs`) or pass a different `--port`
+and point a second TradingView alert at it. The dashboard **trusts the Pine
+export's level columns** (Buy Above / Sell Below, Major R-S, targets, ON/IB,
+prior-week, VWAP) rather than recomputing them.
+
 ## Live alerts (auto-run + desktop notifications)
 
 Watch mode polls a feed, recomputes the ladder, and fires a **desktop
