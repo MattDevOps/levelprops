@@ -81,3 +81,29 @@ def levels_from_csv(path: str) -> list:
         for row in csv.DictReader(f):
             last = row
     return extract_levels(last) if last is not None else []
+
+
+def levels_at(path: str, day, at_time) -> list:
+    """Named levels from the Pine row at (or just before) `at_time` on `day`.
+
+    Aligns the levels to the bar being analyzed so intraday columns (VWAP, IB,
+    bands) reflect that moment, not end-of-day. Falls back to the day's last row
+    if nothing is at/before `at_time`, then to the file's last row overall.
+    """
+    from .loaders import row_timestamp
+
+    best = None          # latest row on `day` with time <= at_time
+    day_last = None      # latest row on `day` (any time)
+    file_last = None     # final row in the file
+    with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+            file_last = row
+            ts = row_timestamp(row)
+            if ts.date() != day:
+                continue
+            if day_last is None or ts > day_last[0]:
+                day_last = (ts, row)
+            if ts.time() <= at_time and (best is None or ts > best[0]):
+                best = (ts, row)
+    chosen = best or day_last
+    return extract_levels(chosen[1]) if chosen else extract_levels(file_last or {})

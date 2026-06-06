@@ -22,7 +22,7 @@ adapt `_parse_row` / the bucketing here — the rest of the package is unchanged
 """
 import csv
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from .model import (Bar, Session, RTH_OPEN, RTH_CLOSE, BARS_PER_RTH,
                     BAR_MINUTES, label_for_bar)
@@ -40,19 +40,27 @@ def _et(dt):
         return dt
 
 
-def _parse_row(row: dict) -> tuple:
+def row_timestamp(row: dict):
+    """Parse a CSV row's timestamp to a US/Eastern datetime (the RTH clock).
+
+    Accepts TradingView's `time`/`timestamp`/`date` column as ISO-8601 or Unix
+    epoch seconds. Shared by the bar loader and the Pine level reader so both
+    bucket rows onto the same trading day / bar time.
+    """
     low = {k.lower().strip(): v for k, v in row.items()}
-    # TradingView exports the column as "time"; accept common aliases.
     raw_ts = (low.get("timestamp") or low.get("time") or low.get("date") or "").strip()
     try:                                  # ISO-8601 (with or without tz offset / Z)
         ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
     except ValueError:                    # Unix epoch seconds (UTC) fallback
-        ts = datetime.fromtimestamp(int(float(raw_ts)),
-                                    tz=__import__("datetime").timezone.utc)
-    ts = _et(ts)                          # normalize to Eastern before the RTH split
+        ts = datetime.fromtimestamp(int(float(raw_ts)), tz=timezone.utc)
+    return _et(ts)                        # normalize to Eastern before the RTH split
+
+
+def _parse_row(row: dict) -> tuple:
+    low = {k.lower().strip(): v for k, v in row.items()}
     bar = Bar(float(low["open"]), float(low["high"]),
               float(low["low"]), float(low["close"]))
-    return ts, bar
+    return row_timestamp(row), bar
 
 
 def load_sessions_from_csv(path: str, warn=True) -> list:

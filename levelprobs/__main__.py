@@ -41,11 +41,13 @@ def main():
 
     if not args.watch:
         if args.history_csv:
-            # Real-data path: load bars + TRUST Pine's exported level columns.
+            # Real-data path: load bars + TRUST Pine's exported level columns,
+            # aligned to the bar being analyzed (not end-of-day).
             from .loaders import load_sessions_from_csv
-            from .pine import levels_from_csv
+            from .pine import levels_at
             sess = load_sessions_from_csv(args.history_csv)
-            named = levels_from_csv(args.history_csv)
+            named = levels_at(args.history_csv, sess[-1].day,
+                              _time.fromisoformat(args.time))
             print(analyze(args.symbol, at_time=args.time, halflife=args.halflife,
                           price=args.price, targets=args.target,
                           history=sess[:-1], today=sess[-1], named_override=named))
