@@ -40,6 +40,16 @@ def main():
     args = ap.parse_args()
 
     if not args.watch:
+        if args.history_csv:
+            # Real-data path: load bars + TRUST Pine's exported level columns.
+            from .loaders import load_sessions_from_csv
+            from .pine import levels_from_csv
+            sess = load_sessions_from_csv(args.history_csv)
+            named = levels_from_csv(args.history_csv)
+            print(analyze(args.symbol, at_time=args.time, halflife=args.halflife,
+                          price=args.price, targets=args.target,
+                          history=sess[:-1], today=sess[-1], named_override=named))
+            return
         print(analyze(args.symbol, sessions=args.sessions, at_time=args.time,
                       halflife=args.halflife, price=args.price, targets=args.target,
                       seed=args.seed))
