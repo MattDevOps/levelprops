@@ -106,10 +106,12 @@ class YahooPollFeed:
     No account, no API key, no inbound tunnel: a plain outbound HTTP poll. This
     is the default source for live use. History (the model base) is pulled once
     from a longer Yahoo range, or supplied via `history` (e.g. a CSV export).
+    Yahoo caps 5-min data at 60 days, so "60d" is the deepest usable history_range
+    (tokens like "2mo"/"3mo" 422 at 5m granularity).
     """
 
     def __init__(self, symbol: str = "SPX", history=None,
-                 history_range: str = "1mo"):
+                 history_range: str = "60d"):
         from .loaders import sessions_from_pairs
         self.symbol = symbol.upper()
         self.ticker = YAHOO_TICKER.get(self.symbol, "^GSPC")
