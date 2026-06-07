@@ -11,7 +11,7 @@ WorkingDirectory=/home/matt/git/levelprobs
 # a plain outbound poll. History is pulled from Yahoo automatically, and alerts
 # are suppressed while the market is closed.
 ExecStart=/usr/bin/python3 -m levelprobs SPX --watch --feed yahoo \
-    --poll 20 --min-prob 0.80 --min-points 15
+    --poll 20 --min-prob 0.90 --min-points 25
 Restart=always
 RestartSec=5
 # desktop notifications need the user session bus (inherited by --user services)
