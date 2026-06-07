@@ -52,7 +52,15 @@ def run_dashboard(feed, symbol, csv_path=None, halflife=252,
         if max_ticks and iters >= max_ticks:
             break
         iters += 1
-        snap = feed.snapshot()
+        try:
+            snap = feed.snapshot()
+        except Exception as e:                       # transient feed/network error
+            print((CLEAR if clear else "") + _header(symbol, iters, mode, [],
+                  refresh_seconds, getattr(feed, "market_open", True))
+                  + f"\n\n{DIM}feed error: {e} -- retrying{X}")
+            if refresh_seconds:
+                _time.sleep(refresh_seconds)
+            continue
         if snap is None:
             print(f"{DIM}feed exhausted -- session over{X}")
             return "exhausted"

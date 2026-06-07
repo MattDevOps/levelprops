@@ -44,7 +44,13 @@ def watch(feed, symbol, min_prob=0.80, min_points=15.0, halflife=252,
         if max_ticks and iters >= max_ticks:
             break
         iters += 1
-        snap = feed.snapshot()
+        try:
+            snap = feed.snapshot()
+        except Exception as e:                       # transient feed/network error
+            print(f"{DIM}feed error: {e} -- retrying{X}")
+            if poll_seconds:
+                time.sleep(poll_seconds)
+            continue
         if snap is None:
             print(f"{DIM}feed exhausted -- session over{X}")
             break
