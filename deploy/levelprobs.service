@@ -1,5 +1,5 @@
 [Unit]
-Description=levelprobs live SPX level-hit alerts (TradingView webhook)
+Description=levelprobs live SPX level-hit alerts (Yahoo Finance ^GSPC)
 After=graphical-session.target
 PartOf=graphical-session.target
 
@@ -7,10 +7,11 @@ PartOf=graphical-session.target
 Type=simple
 Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=/home/matt/git/levelprobs
-# Edit --history-csv to point at your TradingView SPX 5-min export.
-ExecStart=/usr/bin/python3 -m levelprobs SPX --watch --feed webhook \
-    --history-csv /home/matt/git/levelprobs/data/spx_history.csv \
-    --port 8731 --poll 10 --min-prob 0.80 --min-points 15
+# Real, live data via Yahoo Finance (^GSPC 5-min bars). No account, no tunnel:
+# a plain outbound poll. History is pulled from Yahoo automatically, and alerts
+# are suppressed while the market is closed.
+ExecStart=/usr/bin/python3 -m levelprobs SPX --watch --feed yahoo \
+    --poll 20 --min-prob 0.80 --min-points 15
 Restart=always
 RestartSec=5
 # desktop notifications need the user session bus (inherited by --user services)

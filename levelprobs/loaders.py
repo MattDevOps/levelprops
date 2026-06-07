@@ -63,20 +63,27 @@ def _parse_row(row: dict) -> tuple:
     return row_timestamp(row), bar
 
 
-def load_sessions_from_csv(path: str, warn=True) -> list:
-    """Build oldest-first `list[Session]` from a 5-minute intraday CSV."""
+def sessions_from_pairs(pairs, warn=True, require_full=True, source="feed") -> list:
+    """Build oldest-first `list[Session]` from (ET-datetime, Bar) pairs.
+
+    Shared by the CSV loader and any live feed (e.g. Yahoo) so both bucket bars
+    onto the same trading-day / RTH grid. `require_full` skips days without a
+    near-complete RTH grid (right for history); pass False to keep a partial
+    day (right for a still-forming live session).
+    """
     by_day = defaultdict(list)
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            ts, bar = _parse_row(row)
-            by_day[ts.date()].append((ts, bar))
+    for ts, bar in pairs:
+        by_day[ts.date()].append((ts, bar))
 
     sessions, skipped, prior_close = [], 0, None
     for day in sorted(by_day):
         rows = sorted(by_day[day], key=lambda x: x[0])
         on = [b for ts, b in rows if ts.time() < RTH_OPEN]
         rth = [b for ts, b in rows if RTH_OPEN <= ts.time() < RTH_CLOSE]
-        if len(rth) < BARS_PER_RTH * 0.8:   # need a near-complete session
+        if require_full and len(rth) < BARS_PER_RTH * 0.8:
+            skipped += 1
+            continue
+        if not rth:                          # nothing in RTH yet (pre-open)
             skipped += 1
             continue
         rth = rth[:BARS_PER_RTH]
@@ -91,8 +98,15 @@ def load_sessions_from_csv(path: str, warn=True) -> list:
     if warn and skipped:
         print(f"[loaders] skipped {skipped} day(s) without a near-complete RTH grid")
     if not sessions:
-        raise ValueError(f"no usable sessions parsed from {path!r}")
+        raise ValueError(f"no usable sessions parsed from {source!r}")
     return sessions
+
+
+def load_sessions_from_csv(path: str, warn=True) -> list:
+    """Build oldest-first `list[Session]` from a 5-minute intraday CSV."""
+    with open(path, newline="") as f:
+        pairs = [_parse_row(row) for row in csv.DictReader(f)]
+    return sessions_from_pairs(pairs, warn=warn, source=path)
 
 
 def sessions_to_csv(sessions: list, path: str) -> None:

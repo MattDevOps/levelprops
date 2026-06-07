@@ -11,11 +11,29 @@ from datetime import time as _time
 
 
 def run_demo(args):
-    """Live full-report dashboard. Two sources:
-      replay  (default): stream a real TradingView CSV export bar-by-bar
-      webhook (--feed webhook): truly live, fed by TradingView alerts."""
+    """Live full-report dashboard. Sources (--feed):
+      yahoo   (default): REAL & LIVE -- polls Yahoo Finance for ^GSPC 5-min bars
+      replay           : stream a recorded TradingView CSV export bar-by-bar
+      webhook          : truly live, fed by TradingView alerts (needs a tunnel)"""
     from .dashboard import run_dashboard
     sym = "SPX" if args.symbol.upper() == "ES" else args.symbol.upper()
+
+    if args.feed == "yahoo":
+        from .feeds import YahooPollFeed
+        history = None
+        if args.history_csv:
+            from .loaders import load_sessions_from_csv
+            history = load_sessions_from_csv(args.history_csv)
+            print(f"[demo] yahoo: live price from ^GSPC; Pine level overlay read "
+                  f"from {args.history_csv}\n"
+                  f"       (levels are only current if that export is today's; "
+                  f"otherwise they are stale).")
+        feed = YahooPollFeed(sym, history=history)
+        run_dashboard(feed, sym, csv_path=args.history_csv, halflife=args.halflife,
+                      refresh_seconds=args.refresh or 15.0, min_prob=args.min_prob,
+                      min_points=args.min_points, mode="YAHOO ^GSPC LIVE",
+                      synthetic=False)
+        return
 
     if args.feed == "webhook":
         from .feeds import TradingViewWebhookFeed
@@ -31,12 +49,12 @@ def run_demo(args):
                       synthetic=history is None)
         return
 
-    # replay mode -- needs real data to replay
+    # replay mode -- needs a recorded CSV to replay
     if not args.history_csv:
-        print("[demo] replay needs --history-csv (real data to replay).\n"
-              "       e.g. python -m levelprobs SPX --demo "
+        print("[demo] replay needs --history-csv (recorded data to replay).\n"
+              "       e.g. python -m levelprobs SPX --demo --feed replay "
               "--history-csv data/spx_history.csv\n"
-              "       or run truly live with: --demo --feed webhook")
+              "       or just run live (default): python -m levelprobs SPX --demo")
         return
     from .feeds import CsvReplayFeed
     refresh = args.refresh if args.refresh is not None else 0.6
@@ -65,14 +83,15 @@ def main():
     ap.add_argument("--seed", type=int, default=7, help="synthetic RNG seed")
     # --- live dashboard / watch mode ---
     ap.add_argument("--demo", action="store_true",
-                    help="live full-report dashboard (replay CSV, or webhook live)")
+                    help="live full-report dashboard (default feed: real Yahoo data)")
     ap.add_argument("--refresh", type=float, default=None,
-                    help="dashboard redraw interval secs (default 0.6 replay / 5 live)")
+                    help="dashboard redraw interval secs (default 15 yahoo / 0.6 replay)")
     ap.add_argument("--repeat", action="store_true",
                     help="loop the replay demo forever (Ctrl-C to stop)")
     ap.add_argument("--watch", action="store_true", help="run the live alert loop")
-    ap.add_argument("--feed", choices=["synthetic", "webhook"], default="synthetic",
-                    help="data source for --watch")
+    ap.add_argument("--feed", choices=["yahoo", "synthetic", "replay", "webhook"],
+                    default="yahoo",
+                    help="data source for --demo / --watch (default: yahoo = real live)")
     ap.add_argument("--min-prob", type=float, default=0.80,
                     help="alert threshold probability (default 0.80)")
     ap.add_argument("--min-points", type=float, default=15.0,
@@ -116,7 +135,10 @@ def main():
         from .loaders import load_sessions_from_csv
         history = load_sessions_from_csv(args.history_csv)
         print(f"[history] loaded {len(history)} real sessions from {args.history_csv}")
-    if args.feed == "webhook":
+    if args.feed == "yahoo":
+        from .feeds import YahooPollFeed
+        feed = YahooPollFeed(sym, history=history)
+    elif args.feed == "webhook":
         from .feeds import TradingViewWebhookFeed
         feed = TradingViewWebhookFeed(sym, port=args.port, history=history,
                                       sessions=args.sessions, seed=args.seed)

@@ -53,6 +53,12 @@ def watch(feed, symbol, min_prob=0.80, min_points=15.0, halflife=252,
             if poll_seconds:
                 time.sleep(poll_seconds)
             continue
+        if getattr(feed, "market_open", True) is False:
+            print(f"{DIM}market closed -- no alerts (last quote "
+                  f"{getattr(feed, 'last_quote_et', None)}){X}")
+            if poll_seconds:
+                time.sleep(poll_seconds)
+            continue
         history, today, bar_index, price = snap
         res = compute(symbol, history, today, bar_index, price=price,
                       halflife=halflife)

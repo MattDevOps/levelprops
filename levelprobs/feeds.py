@@ -7,15 +7,17 @@ engine.
 
 Included:
   * SyntheticReplayFeed   -- replays a synthetic day bar-by-bar (demo / no data)
+  * CsvReplayFeed         -- replays a recorded TradingView export bar-by-bar
+  * YahooPollFeed         -- REAL & LIVE: polls Yahoo Finance for ^GSPC 5-min bars
+                             (no account, no tunnel; the default live source)
   * TradingViewWebhookFeed -- real: a local HTTP server fed by TradingView alerts
 
 Documented swap-ins (add as needed):
-  * CSV/poll feed   -- re-read a file your platform appends bars to
   * IBKR feed       -- ib_insync reqHistoricalData + live ticks (TWS/Gateway)
 """
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .api import synthetic_tape
@@ -64,6 +66,84 @@ class CsvReplayFeed:
         price = self.today.bars[bi].c
         self.cursor += 1
         return self.history, self.today, bi, price
+
+
+# Cash-index tickers keep prices consistent with the SPX Pine levels (the ES
+# futures basis would offset them by a handful of points).
+YAHOO_TICKER = {"SPX": "^GSPC", "ES": "^GSPC", "NQ": "^NDX"}
+
+
+def _yahoo_pairs(ticker: str, rng: str = "1d", interval: str = "5m"):
+    """Fetch ([(ET-datetime, Bar)], meta) from Yahoo's public chart API.
+
+    Uses `requests` (already a dependency) and a browser User-Agent. Rows with
+    any null OHLC field (Yahoo pads gaps with nulls) are skipped.
+    """
+    import requests
+    from .loaders import _et
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+    r = requests.get(url, params={"interval": interval, "range": rng},
+                     headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+    r.raise_for_status()
+    res = r.json()["chart"]["result"][0]
+    meta = res.get("meta", {})
+    ts = res.get("timestamp") or []
+    q = res["indicators"]["quote"][0]
+    pairs = []
+    for i, t in enumerate(ts):
+        o, h, l, c = q["open"][i], q["high"][i], q["low"][i], q["close"][i]
+        if None in (o, h, l, c):
+            continue
+        dt = _et(datetime.fromtimestamp(t, tz=timezone.utc))
+        pairs.append((dt, Bar(float(o), float(h), float(l), float(c))))
+    return pairs, meta
+
+
+class YahooPollFeed:
+    """REAL, LIVE feed -- polls Yahoo Finance for the cash index (^GSPC) and
+    rebuilds today's session from actual 5-min OHLC bars on every snapshot.
+
+    No account, no API key, no inbound tunnel: a plain outbound HTTP poll. This
+    is the default source for live use. History (the model base) is pulled once
+    from a longer Yahoo range, or supplied via `history` (e.g. a CSV export).
+    """
+
+    def __init__(self, symbol: str = "SPX", history=None,
+                 history_range: str = "1mo"):
+        from .loaders import sessions_from_pairs
+        self.symbol = symbol.upper()
+        self.ticker = YAHOO_TICKER.get(self.symbol, "^GSPC")
+        if history is not None:
+            self._all = list(history)
+        else:
+            pairs, _ = _yahoo_pairs(self.ticker, rng=history_range, interval="5m")
+            self._all = sessions_from_pairs(pairs, warn=False,
+                                            source=f"yahoo:{self.ticker}")
+        self.ready = True
+        self.market_open = False
+        self.last_quote_et = None
+
+    def snapshot(self):
+        from .loaders import _et, sessions_from_pairs
+        pairs, meta = _yahoo_pairs(self.ticker, rng="1d", interval="5m")
+        if not pairs:
+            return None
+        sess = sessions_from_pairs(pairs, warn=False, require_full=False,
+                                   source=f"yahoo:{self.ticker}")
+        today = sess[-1]
+        history = [s for s in self._all if s.day < today.day] or self._all[:-1] \
+            or self._all
+        # Current bar from the real exchange clock (meta) when available.
+        rmt = meta.get("regularMarketTime")
+        if rmt:
+            self.last_quote_et = _et(datetime.fromtimestamp(rmt, tz=timezone.utc))
+            now_et = _et(datetime.now(timezone.utc))
+            self.market_open = (now_et - self.last_quote_et).total_seconds() < 900
+            bi = bar_index_for(self.last_quote_et.time())
+        else:
+            bi = len(today.bars) - 1
+        price = meta.get("regularMarketPrice") or today.bars[-1].c
+        return history, today, bi, float(price)
 
 
 class _LiveToday:

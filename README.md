@@ -112,27 +112,41 @@ that day's overnight high/low; 09:30–15:55 are the RTH bars. See
 ## Live dashboard (`--demo`)
 
 A full-screen, self-refreshing view of the whole report -- directional bias +
-the Pine-levels price ladder -- redrawn on every tick so you can watch
-`P(touch)` move and the named levels re-snap as price walks. Two sources:
+the price ladder -- redrawn on every tick so you can watch `P(touch)` move as
+price walks. The default source is **real, live data**:
 
 ```bash
-# INSTANT DEMO -- replays your real TradingView export bar-by-bar (real SPX
-# prices, time-compressed). No market hours, no ngrok needed:
-python3 -m levelprobs SPX --demo --history-csv data/spx_history.csv
-#   --refresh 0.6   redraw interval (seconds)
-#   --repeat        loop the day forever (good for a screen recording)
+# REAL & LIVE (default) -- polls Yahoo Finance for the ^GSPC cash index
+# (5-min bars). No account, no API key, no tunnel. History is pulled from
+# Yahoo automatically. During RTH this tracks the actual SPX in real time;
+# off-hours it shows the last session, banner-flagged [MARKET CLOSED].
+python3 -m levelprobs SPX --demo
+#   --refresh 15    redraw / re-poll interval (seconds)
 
-# TRULY LIVE -- fed by the TradingView webhook (real-time SPX price); levels
-# come from the CSV export, refreshed each tick:
+# REPLAY -- stream a recorded TradingView export bar-by-bar (real SPX prices,
+# time-compressed; good for a screen recording). Not live:
+python3 -m levelprobs SPX --demo --feed replay --history-csv data/spx_history.csv --repeat
+
+# WEBHOOK -- truly live via a TradingView alert (needs a paid plan + tunnel;
+# see "Plugging into TradingView" below). Yahoo is simpler and needs neither.
 python3 -m levelprobs SPX --demo --feed webhook --history-csv data/spx_history.csv
 ```
 
-Live mode binds the webhook port (default 8731, `--port`). If the auto-start
-`levelprobs` systemd service is already running it owns that port, so either
-stop it first (`systemctl --user stop levelprobs`) or pass a different `--port`
-and point a second TradingView alert at it. The dashboard **trusts the Pine
-export's level columns** (Buy Above / Sell Below, Major R-S, targets, ON/IB,
-prior-week, VWAP) rather than recomputing them.
+### Pine level overlay (optional)
+
+The named Pine levels (Buy Above / Sell Below, Major R-S, targets, ON/IB,
+prior-week, VWAP) are computed by a proprietary TradingView indicator and live
+**only** in its CSV export -- no live feed (Yahoo or webhook) can fetch them.
+Pass `--history-csv` in `yahoo` mode to overlay them onto the live ladder:
+
+```bash
+python3 -m levelprobs SPX --demo --history-csv data/spx_history.csv
+```
+
+These tags are only current if that export is **today's**. With a stale export
+(e.g. Friday's), the daily levels (R1-R5 etc.) are last session's and will be
+wrong -- re-export each morning, or omit `--history-csv` to run the pure
+auto-scan ladder (round numbers + `P(touch)`), which needs no TradingView at all.
 
 ## Live alerts (auto-run + desktop notifications)
 
@@ -151,77 +165,50 @@ work for one-shot reports, but `--watch` always evaluates SPX.
 python3 -m levelprobs SPX --watch --time 09:30 --poll 0 --min-points 20
 ```
 
-### Plugging into TradingView (the real thing)
+### Plugging in real data
 
-TradingView has no free public data API, so there are two honest paths:
+**A. Yahoo Finance (default, recommended).** Python polls Yahoo's public chart
+API for the `^GSPC` cash index -- real 5-min OHLC bars, no account, no API key,
+no inbound tunnel. Both *history* (the model base) and *today* (built live from
+real bars) come from Yahoo, so the probabilities are real, not synthetic.
 
-**A. TradingView alert -> webhook -> local Python** (most literal "plug in")
-Requires a paid TradingView plan (webhooks are Pro+) and a public URL to reach
-your machine (e.g. `ngrok http 8731`).
+```bash
+python3 -m levelprobs SPX --watch --feed yahoo --poll 20
+```
 
-1. Run the receiver:
-   ```bash
-   python3 -m levelprobs SPX --watch --feed webhook --port 8731 --poll 10
-   ```
-2. In TradingView, create an alert on SPX (condition: "once per bar close"),
-   enable **Webhook URL** = your ngrok URL, and set the message to:
-   ```json
-   {"price": {{close}}}
-   ```
-   TradingView POSTs the price on every bar close; the loop recomputes and
-   notifies you. (Historical bars still come from the synthetic tape until you
-   wire a real history source via `loaders.load_sessions_from_csv` -- see below.)
+Alerts are suppressed while the market is closed (Yahoo would otherwise return
+the last session's stale close). The cash index `^GSPC` is used (not ES futures)
+so prices line up with the SPX Pine levels rather than the futures basis.
 
-**B. Independent data feed (IBKR / Databento / Polygon)**
-Python pulls live + historical SPX/ES bars itself and you keep TradingView open
-as your chart. Add a feed class in `feeds.py` with a `snapshot()` returning
+**B. TradingView alert -> webhook -> local Python.** The literal "push from
+TradingView" path. Requires a paid plan (webhooks are Pro+) and a public URL to
+your machine (e.g. `ngrok http 8731`). More moving parts than Yahoo for the same
+price; use it only if you specifically want TradingView as the source.
+
+```bash
+python3 -m levelprobs SPX --watch --feed webhook \
+    --history-csv data/spx_history.csv --port 8731 --poll 10
+# then: ngrok http 8731, and a TradingView "once per bar close" alert whose
+# Webhook URL is the ngrok URL and whose message body is:  {"price": {{close}}}
+```
+
+**C. Independent data feed (IBKR / Databento / Polygon).** For a brokerage data
+subscription: add a feed class in `feeds.py` with a `snapshot()` returning
 `(history, today, bar_index, price)` -- the IBKR sketch (`ib_insync`
-`reqHistoricalData` + live ticks) is noted in that file. This is the most robust
-path if you have a brokerage data subscription.
+`reqHistoricalData` + live ticks) is noted in that file.
 
-> Until a real history source is wired, the **probabilities are synthetic**
-> (the alert *mechanism* is real, the numbers are not). Wire `history`/`today`
-> from real bars to make them meaningful.
+### Auto-start on login (systemd user service)
 
-### Full setup: TradingView Pro+ webhook + auto-start (the configured path)
+Installed and running at `~/.config/systemd/user/levelprobs.service`, configured
+for the **Yahoo** feed -- no CSV, no tunnel, fully self-contained:
 
-1. **Export history** from TradingView (SPX, 5-min) and save it to
-   `data/spx_history.csv`. See `data/README.md` for the format. Verify:
-   ```bash
-   python3 -c "from levelprobs.loaders import load_sessions_from_csv as L; print(len(L('data/spx_history.csv')),'sessions')"
-   ```
-2. **Run the receiver** (foreground, to test):
-   ```bash
-   python3 -m levelprobs SPX --watch --feed webhook \
-       --history-csv data/spx_history.csv --port 8731 --poll 10
-   ```
-3. **Expose it** so TradingView can reach your machine:
-   ```bash
-   ngrok http 8731      # copy the https URL it prints
-   ```
-4. **Create the TradingView alert** on SPX: condition "once per bar close",
-   enable **Webhook URL** = `https://<your-ngrok>.ngrok-free.app`, message:
-   ```json
-   {"price": {{close}}}
-   ```
-   Now every bar close pushes the price; the loop recomputes and pops a desktop
-   alert when P(touch) >= 80% with a >= 15-pt capturable move.
-
-5. **Auto-start on login** (systemd user service, already installed at
-   `~/.config/systemd/user/levelprobs.service`):
-   ```bash
-   # edit the --history-csv path in the unit if needed, then:
-   systemctl --user daemon-reload
-   systemctl --user enable --now levelprobs.service
-   systemctl --user status levelprobs.service     # check it's running
-   journalctl --user -u levelprobs.service -f      # live logs
-   ```
-   (The service is installed but **disabled** until you drop in the CSV --
-   enabling it without history would crash-loop. ngrok still needs to run
-   separately, or add a second user service for it.)
-
-Live price drives "today" (bars built from the stream); the CSV is the
-historical base the probabilities are computed against.
+```bash
+cp deploy/levelprobs.service ~/.config/systemd/user/levelprobs.service
+systemctl --user daemon-reload
+systemctl --user enable --now levelprobs.service
+systemctl --user status levelprobs.service     # check it's running
+journalctl --user -u levelprobs.service -f      # live logs (shows "market closed" off-hours)
+```
 
 ## A note on timeframe
 
@@ -245,7 +232,7 @@ levelprobs/
   api.py           orchestration (compute() data + analyze() text)
   alerts.py        tradeable-setup condition (>= prob AND >= points)
   notify.py        desktop notifications (notify-send) + de-dup
-  feeds.py         live feeds: synthetic replay + TradingView webhook
+  feeds.py         live feeds: Yahoo poll (default), CSV/synthetic replay, webhook
   watch.py         live loop (SPX-only alerts)
 tests/test_engine.py   property tests (monotonicity, time-decay, weighting)
 data/              real SPX history CSV + format docs
